@@ -4,18 +4,38 @@
 
 ---
 
-Three workflows, one theme: taking unstructured inputs and producing structured, actionable outputs.
+Every business has the same inbox problem: invoices that need to be logged, compliance notices that need immediate attention, vendor updates worth tracking, and noise that should disappear. The default solution is a human reading every email and deciding what to do. This automates that decision — and the actions that follow.
 
-**Email classification and routing**
+**Email Router** (`aCEsXeWi75h6ffV7` — 15 nodes) processes every incoming message. Claude reads the email and classifies it into one of 9 categories. Rules handle the rest — no human triage required for routine volume:
 
-The business inbox receives four types of messages: invoices, compliance notices, product/service updates, and noise. A Gmail → n8n connection reads incoming messages. Claude classifies each one. Four routing rules handle the rest: invoices go to the invoice extraction handler, compliance notices trigger a Slack flag for immediate review, product updates log to the email registry, junk archives without action.
+```
+Gmail Trigger ─┐
+               ├─ V4 Rules Classifier → Log to Database → Mark as Read
+Webhook       ─┘                                               └─ Has Label? → Apply Gmail Label
+                                                                                    └─ Should Archive?
+                                                                                         ├─ [yes] → Archive Email
+                                                                                         └─ [no]  → Keep in Inbox
+                                                                                                        └─ Log Health Check
+Error Trigger → Error: Log
+```
 
-The classifier doesn't use keywords. It reads the email and makes a judgment. The rules determine what happens next. That separation — classify once, route by rule — means adding a new category is one rule addition, not a rewrite of the classifier.
+Error paths from three nodes merge into one table — any failure in the flow is captured regardless of where it happened.
 
-**Invoice extraction**
+**Invoice Handler** (`SzwzUJfjjNo6qJyn` — 16 nodes) runs daily at 6 AM on whatever the Router flagged as financial. It handles the two formats an invoice arrives in — email body or PDF attachment — and produces the same structured output either way:
 
-Invoices that reach the handler get parsed: vendor name, amount, invoice date, due date, category. Claude extracts the fields. A confidence threshold determines whether the record goes straight to the expenses table or to a pending queue for human review. Slack confirmation closes the loop — I know it landed and whether it needs attention.
+```
+Daily 6am / Chat Trigger
+  └─ Get Financial Emails → Any Emails?
+                                 ├─ [no]  → Done
+                                 └─ [yes] → Extract Invoice Data → Has PDF?
+                                                                        ├─ [yes] → Download PDF → Upload to Drive ─┐
+                                                                        └─ [no]  → Continue ─────────────────────┤
+                                                                                                           Merge Back
+                                                                                                                └─ Insert to expenses → Apply Label → Slack Summary
+```
 
-The constraint that shaped the design: the AI doesn't approve financial records. It extracts, categorizes, and routes. The human reviews the pending queue and clears it. Automation handles 90%+ of invoices without intervention. The 10% that need a second look are flagged, not silently filed.
+Vendor name, amount, invoice date, due date, IRS category — extracted and written to `aos_expenses` automatically. Slack summary at the end closes the loop: how many invoices processed, whether anything needs review.
 
-**Why it matters:** Extracting structured signal from unstructured inputs is the same problem across both workflows. The patterns — classify before routing, separate extraction from decision-making, automate preparation while keeping human approval at the right boundary — apply anywhere you're processing documents, emails, or records at volume.
+The classifier reads the email rather than matching keywords. That separation — classify once, route by rule — means adding a new email type is one rule addition, not a classifier rewrite. 90%+ of emails process without intervention.
+
+**Why it matters:** Most businesses are one step away from this — Gmail is already connected, the emails are already arriving. The gap is structured extraction and routing logic. The same architecture applies anywhere unstructured inputs need to become actionable records: support tickets, vendor communications, compliance filings.
